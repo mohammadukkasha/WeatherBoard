@@ -39,6 +39,30 @@ A second agent session had been started on the same folder by mistake, and both 
 - Reminders: decided a **Node push server** was needed because browsers can't schedule a notification for later with the tab closed. Built it with Express + web-push: VAPID, IANA time zones, a 30 s scheduler with catch-up, SSRF allow-list and input validation.
 - Offline: service-worker cache stamping, so offline data is labelled with its real age.
 
+### 4. Publish to GitHub
+
+> *(pasted GitHub's "push an existing repository" commands)* iska code ko github pa push krdo safety ka khayal ka sath
+
+*Translation:* "Push this code to GitHub, taking care of safety."
+
+**What the agent did:** scanned every file to be committed for API keys, tokens, private keys and personal paths; confirmed `.env.local` and the push server's VAPID private key were ignored; hardened `.gitignore`; skipped the pasted `echo "# WeatherBoard" >> README.md` line (it would have appended a duplicate heading); pushed and re-checked the public repo's file list through the GitHub API.
+
+### 5. Deploy both parts to Vercel
+
+> dono ko vercel pr he push krna ha
+
+*Translation:* "Both (front end and back end) should go on Vercel."
+
+**What the agent did:** turned the push server into a Vercel serverless function (`api/index.js`) sharing the Express app with the local server, moved storage to Upstash Redis (serverless has no persistent disk), made `/api/cron/tick` callable by a scheduler and idempotent per reminder, and pointed production builds at the same-origin API. A local simulation (real handler + Redis mock) caught a bug before deploy: two copies of `web-push` were loaded, so pushes went out without the VAPID header (401).
+
+### 6. Live API returned 503
+
+> https://weather-board-gilt.vercel.app/ yeh deploy toh hogya ha magar backend nhi chal raha … /api/push/public-key 503
+
+*Translation:* "It's deployed, but the back end isn't working (503)."
+
+**What the agent did:** read the live error (no Redis store connected), walked through connecting Upstash Redis and `CRON_SECRET`, and made credential detection work with any Vercel env prefix.
+
 ---
 
 ## Where the AI output needed fixing

@@ -2,7 +2,8 @@
 
 An installable weather dashboard: search any city, see current conditions, the next 24 hours and a 5-day forecast, keep up to five favourite cities, and get a daily morning reminder that arrives even when the app is closed. Works offline for the last city you viewed.
 
-**Live app:** _add your Vercel URL here_
+**Live app:** https://weather-board-gilt.vercel.app
+**Source:** https://github.com/mohammadukkasha/WeatherBoard
 
 Built with **React 19, Tailwind CSS 4 and Vite 8** (front end) and a small **Node.js + Express** service for Web Push (back end). Both deploy as **one Vercel project**: the app at `/`, the push API as a serverless function at `/api`.
 
