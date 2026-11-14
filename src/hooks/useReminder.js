@@ -130,13 +130,23 @@ export function useReminder() {
         if (result !== 'granted') return { ok: false, reason: result }
 
         const registration = await getRegistration()
-        if (support.mode === 'push') await subscribeToPush(registration, { time, city })
+        let mode = support.mode
+        if (mode === 'push') {
+          try {
+            await subscribeToPush(registration, { time, city })
+          } catch (error) {
+            // The reminder server answered but isn't set up (503) or isn't deployed
+            // here (404): schedule on the device instead of failing outright.
+            if (error?.status !== 503 && error?.status !== 404) throw error
+            mode = 'local'
+          }
+        }
         await persist({
           ...settings,
           enabled: true,
           time,
           city,
-          mode: support.mode,
+          mode,
           lastSentDate: initialLastSent(time, settings?.lastSentDate),
         })
         return { ok: true }
