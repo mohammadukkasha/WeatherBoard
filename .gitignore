@@ -1,0 +1,26 @@
+# Dependencies and build output
+node_modules
+dist
+dev-dist
+
+# Secrets: never commit real env files or keys (the *.example files are templates)
+*.local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Push server runtime data (VAPID private key, subscriptions)
+server/data
+
+# Hosting / tooling
+.vercel
+.netlify
+.claude/settings.local.json
+.playwright-mcp
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log
