@@ -11,8 +11,14 @@ export const idFor = (endpoint) => createHash('sha256').update(endpoint).digest(
 
 /** Redis when Upstash credentials are present (Vercel Marketplace names or Upstash's own), else a JSON file. */
 export function createStoreFromEnv(env) {
-  const url = env.UPSTASH_REDIS_REST_URL || env.KV_REST_API_URL
-  const token = env.UPSTASH_REDIS_REST_TOKEN || env.KV_REST_API_TOKEN
+  // Vercel's Upstash integration names them KV_REST_API_URL/TOKEN, optionally
+  // with a custom prefix (e.g. MYDB_KV_REST_API_URL); Upstash's own docs use
+  // UPSTASH_REDIS_REST_URL/TOKEN.
+  const urlKey =
+    ['UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL'].find((k) => env[k]) ||
+    Object.keys(env).find((k) => /(KV_REST_API|REDIS_REST)_URL$/.test(k) && env[k])
+  const url = urlKey && env[urlKey]
+  const token = urlKey && env[urlKey.replace(/URL$/, 'TOKEN')]
   if (url && token) return createRedisStore({ url, token })
   if (env.VERCEL) {
     throw new Error(
