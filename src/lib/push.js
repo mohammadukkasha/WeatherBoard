@@ -2,8 +2,13 @@
 // subscription and the small Node reminder server in server/.
 import { ApiError } from '../services/http.js'
 
-const SERVER = (import.meta.env.VITE_PUSH_SERVER_URL || '').trim().replace(/\/+$/, '')
-export const pushServerConfigured = Boolean(SERVER)
+// VITE_PUSH_SERVER_URL: a full URL for a separate server, "/" (or unset in a
+// production build) for the API served from this same origin — the Vercel
+// deployment ships it under /api — or "off" to disable server push.
+const RAW_SERVER = (import.meta.env.VITE_PUSH_SERVER_URL ?? '').trim()
+const SERVER =
+  RAW_SERVER === 'off' ? null : RAW_SERVER ? RAW_SERVER.replace(/\/+$/, '') : import.meta.env.PROD ? '' : null
+export const pushServerConfigured = SERVER !== null
 
 export function getNotificationSupport() {
   if (typeof window === 'undefined') return { supported: false }

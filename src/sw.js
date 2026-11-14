@@ -10,7 +10,7 @@ import { maybeSendReminder, handlePushReminder, SYNC_TAG } from './lib/reminder.
 //    index.html so the app opens with no connection.
 cleanupOutdatedCaches()
 precacheAndRoute(self.__WB_MANIFEST)
-registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')))
+registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html'), { denylist: [/^\/api\//] }))
 
 // 2. Weather data: network first, cache as fallback, so the last-viewed city
 //    works offline. Cached copies are stamped with the time they were fetched;

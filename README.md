@@ -2,10 +2,9 @@
 
 An installable weather dashboard: search any city, see current conditions, the next 24 hours and a 5-day forecast, keep up to five favourite cities, and get a daily morning reminder that arrives even when the app is closed. Works offline for the last city you viewed.
 
-**Live app:** _add your Vercel/Netlify URL here_
-**Push server:** _add your Render/Railway URL here_ (optional, see below)
+**Live app:** _add your Vercel URL here_
 
-Built with **React 19, Tailwind CSS 4 and Vite 8** (front end) and a small **Node.js + Express** service for Web Push (back end).
+Built with **React 19, Tailwind CSS 4 and Vite 8** (front end) and a small **Node.js + Express** service for Web Push (back end). Both deploy as **one Vercel project**: the app at `/`, the push API as a serverless function at `/api`.
 
 ---
 
@@ -39,7 +38,7 @@ The app works with **no API keys** (Open-Meteo needs none). To use the primary p
 |---|---|
 | `VITE_OWM_API_KEY` | [openweathermap.org](https://home.openweathermap.org/api_keys) (free; new keys take up to ~2 h to activate) |
 | `VITE_GEODB_API_KEY` | [GeoDB Cities on RapidAPI](https://rapidapi.com/wirefreethought/api/geodb-cities) (subscribe to the free BASIC plan) |
-| `VITE_PUSH_SERVER_URL` | URL of the push server below, e.g. `http://localhost:8787` |
+| `VITE_PUSH_SERVER_URL` | Local dev: `http://localhost:8787`. Production builds default to the same origin (`/api`), so leave it unset on Vercel; `off` disables server push. |
 
 Production build / PWA check: `npm run build && npm run preview` (http://localhost:4173). The service worker is enabled in dev too, but test offline behaviour on the preview build.
 
@@ -60,7 +59,7 @@ Then set `VITE_PUSH_SERVER_URL=http://localhost:8787` in the front end's `.env.l
 | `PUT /api/push/subscriptions` | Create/update this device's reminder: `{ subscription, time: "07:30", timezone: "Asia/Karachi", city }` |
 | `DELETE /api/push/subscriptions` | Remove it: `{ endpoint }` |
 | `POST /api/push/test` | Send a test notification now: `{ endpoint }` |
-| `POST /api/cron/tick` | Optional external trigger (needs `Authorization: Bearer $CRON_SECRET`) |
+| `GET` or `POST /api/cron/tick` | Sends due reminders; called every minute on serverless hosts (needs `Authorization: Bearer $CRON_SECRET`) |
 | `GET /api/health` | Health check |
 
 ## Architecture
@@ -77,7 +76,9 @@ src/
   components/    CitySearch, CurrentWeather, HourlyForecast, DailyForecast,
                  Favourites, ReminderCard, ConfirmDialog, Banners, States, …
   sw.js          Workbox precache, weather caching, push / periodicsync / notificationclick
-server/          Express + web-push: subscriptions store, timezone-aware scheduler
+server/          app.js (Express routes), store.js (Upstash Redis or JSON file),
+                 scheduler.js (timezone-aware sending), index.js (local always-on server)
+api/index.js     Vercel serverless entry: the same Express app, Redis-backed
 ```
 
 **Key decisions**
@@ -101,16 +102,21 @@ server/          Express + web-push: subscriptions store, timezone-aware schedul
 
 ## Deployment
 
-**Front end (Vercel or Netlify):** framework preset *Vite*, build `npm run build`, output `dist`. Add the `VITE_*` variables in the project settings.
+Front end and push API deploy together to **Vercel** (`vercel.json` sets the Vite build and rewrites `/api/*` to `api/index.js`):
 
-**Push server (Render, Railway, Fly.io or any Node host):** root directory `server`, start command `npm start`. Set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (from `npm run vapid`), `VAPID_SUBJECT`, `ALLOWED_ORIGINS=https://your-app.vercel.app`. On free tiers that sleep when idle, also set `CRON_SECRET` and have [cron-job.org](https://cron-job.org) call `POST /api/cron/tick` every minute with `Authorization: Bearer <secret>` — this keeps the server awake and on time.
+1. **Import** the GitHub repo at [vercel.com/new](https://vercel.com/new) and deploy (defaults are fine).
+2. **Storage:** project → *Storage* → *Upstash for Redis* (free) → connect it to the project. This adds `KV_REST_API_URL` / `KV_REST_API_TOKEN`; serverless functions have no persistent disk, so subscriptions live in Redis.
+3. **Environment variables:** `CRON_SECRET` (any long random string), optionally `VITE_OWM_API_KEY` and `VITE_GEODB_API_KEY`. VAPID keys are generated on first use and kept in Redis; set `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (from `npm --prefix server run vapid`) if you prefer to manage them. Redeploy.
+4. **Scheduler:** Vercel's Hobby plan only runs cron jobs once a day, so have [cron-job.org](https://cron-job.org) (free) call `https://<your-app>/api/cron/tick` **every minute** with header `Authorization: Bearer <CRON_SECRET>`. On Vercel Pro you can use a `* * * * *` Vercel Cron instead (it sends the same header).
+
+The long-running server in `server/` (`npm start`) still works on any always-on Node host and needs no cron: it has its own 30-second timer and uses a JSON file unless Redis variables are set.
 
 ## Known limitations
 
 - **API keys are visible in the client bundle.** The brief asks for a client-only app; keys are free-tier and restricted by quota. A production version would proxy them through the server.
 - **GeoDB's free tier allows ~1 request/second**, so fast typing often falls back to Open-Meteo Geocoding (the dropdown says which source answered).
 - **OpenWeatherMap's free forecast is 3-hourly**, so its daily highs/lows are computed from 3-hour samples and can differ by a degree from Open-Meteo's true daily extremes.
-- **Push server storage is a JSON file.** Fine for one instance; free hosts may wipe it on redeploy. The app re-registers its schedule on every launch, so reminders recover the next time the app is opened. A real deployment would use Redis/Postgres.
+- **Reminder timing depends on the external cron.** On Vercel Hobby, reminders go out when cron-job.org calls `/api/cron/tick` (every minute). If it misses calls, a reminder is still sent up to 60 minutes late, then skipped for that day; each reminder is claimed in Redis first, so overlapping calls never send it twice.
 - **Without the push server**, reminders depend on Periodic Background Sync (Chrome/Edge, installed app, browser-controlled timing) or on the app being open. Firefox and Safari don't support Periodic Background Sync.
 - **iOS** only allows web notifications for apps added to the Home Screen (iOS 16.4+); the reminder card explains this.
 - Times in the forecast are shown in the **city's** local time; reminder times use the **device's** time zone.

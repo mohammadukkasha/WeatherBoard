@@ -35,6 +35,15 @@ export function initialLastSent(record, now = new Date()) {
   return local.minutes >= toMinutes(record.time) ? local.date : null
 }
 
+/**
+ * Set the VAPID identity on the same web-push instance that sends. (Entry
+ * points must not call web-push themselves: from api/ and server/ they can
+ * resolve to two different copies of the module.)
+ */
+export function configureVapid(keys, subject = 'mailto:weatherboard@example.com') {
+  webpush.setVapidDetails(subject, keys.publicKey, keys.privateKey)
+}
+
 export async function sendReminder(store, record, { test = false } = {}) {
   const payload = JSON.stringify({ type: 'daily-reminder', test, city: record.city })
   try {
@@ -57,7 +66,7 @@ export async function sendReminder(store, record, { test = false } = {}) {
 
 export async function runDueReminders(store, now = new Date()) {
   let sent = 0
-  for (const record of store.all()) {
+  for (const record of await store.all()) {
     let local
     try {
       local = localParts(record.timezone, now)
@@ -66,7 +75,8 @@ export async function runDueReminders(store, now = new Date()) {
     }
     const late = local.minutes - toMinutes(record.time)
     if (record.lastSentDate === local.date || late < 0 || late > CATCH_UP_MINUTES) continue
-    // Mark first so an overlapping tick can't send twice.
+    // Claim first so overlapping ticks (or two serverless instances) can't send twice.
+    if (!(await store.claim(`sent:${record.id}:${local.date}`, 26 * 60 * 60))) continue
     await store.patch(record.id, { lastSentDate: local.date })
     const result = await sendReminder(store, record)
     if (result.ok) sent++
