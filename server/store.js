@@ -19,11 +19,18 @@ export function createStoreFromEnv(env) {
     Object.keys(env).find((k) => /(KV_REST_API|REDIS_REST)_URL$/.test(k) && env[k])
   const url = urlKey && env[urlKey]
   const token = urlKey && env[urlKey.replace(/URL$/, 'TOKEN')]
-  if (url && token) return createRedisStore({ url, token })
+  if (url && token) return createRedisStore(upstashRest(url, token))
+  // Any Redis over TCP: Vercel's "Redis" (Redis Cloud) store sets REDIS_URL;
+  // Upstash also sets KV_URL / REDIS_URL.
+  const tcpKey =
+    ['REDIS_URL', 'KV_URL'].find((k) => env[k]) ||
+    Object.keys(env).find((k) => /(REDIS|KV)_URL$/.test(k) && /^rediss?:\/\//.test(env[k] || ''))
+  if (tcpKey) return createRedisStore(redisTcp(env[tcpKey]))
   if (env.VERCEL) {
+    const seen = Object.keys(env).filter((k) => /REDIS|KV_|UPSTASH/.test(k))
     throw new Error(
-      'No Redis store configured. In Vercel, open Storage → Upstash for Redis, connect it to this project and redeploy ' +
-        '(it sets KV_REST_API_URL and KV_REST_API_TOKEN).',
+      'No Redis store configured. In Vercel, open Storage, create a Redis database (Upstash or Redis), connect it to ' +
+        `this project and redeploy. Redis-related variables found: ${seen.length ? seen.join(', ') : 'none'}.`,
     )
   }
   return createFileStore(env.DATA_DIR || './data')
@@ -34,9 +41,10 @@ export function createStoreFromEnv(env) {
 const SUBS = 'wb:subs' // hash: id -> JSON record
 const VAPID = 'wb:vapid'
 
-export function createRedisStore({ url, token }) {
+/** Upstash's REST API: one HTTPS request per command, ideal for serverless. */
+function upstashRest(url, token) {
   const base = url.replace(/\/+$/, '')
-  async function redis(...command) {
+  return async (...command) => {
     const res = await fetch(base, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -47,6 +55,24 @@ export function createRedisStore({ url, token }) {
     if (!res.ok || data.error) throw new Error(`Redis ${command[0]} failed: ${data.error || res.status}`)
     return data.result
   }
+}
+
+/** Plain Redis over TCP/TLS, one connection reused per function instance. */
+function redisTcp(url) {
+  let client
+  return async (...command) => {
+    if (!client) {
+      const { createClient } = await import('redis')
+      const c = createClient({ url, socket: { connectTimeout: 5000, reconnectStrategy: (n) => (n > 2 ? false : 200) } })
+      c.on('error', (err) => console.error('[redis]', err.message))
+      client = c.connect().then(() => c)
+      client.catch(() => (client = undefined))
+    }
+    return (await client).sendCommand(command.map(String))
+  }
+}
+
+export function createRedisStore(redis) {
   const parse = (raw) => (raw ? JSON.parse(raw) : undefined)
 
   return {
@@ -54,6 +80,7 @@ export function createRedisStore({ url, token }) {
     idFor,
     async all() {
       const flat = (await redis('HGETALL', SUBS)) || []
+      if (!Array.isArray(flat)) return Object.values(flat).map((v) => JSON.parse(v)) // RESP3-style map
       const out = []
       for (let i = 1; i < flat.length; i += 2) out.push(JSON.parse(flat[i]))
       return out
